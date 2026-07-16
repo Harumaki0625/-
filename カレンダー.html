@@ -1,0 +1,463 @@
+<!DOCTYPE html>  
+<html lang="ja">  
+<head>  
+  <meta charset="UTF-8" />  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />  
+  <title>勤務カレンダー（共有JSON）</title>  
+  
+  <!-- PWA（不要なら削除OK） -->  
+  <link rel="manifest" href="./manifest.json">  
+  <meta name="theme-color" content="#4e73df" />  
+  
+  <style>  
+    body{font-family:Meiryo,sans-serif;background:#f5f7fa;margin:20px;}  
+    h1{text-align:center;}  
+    .toolbar{width:1200px;margin:auto;margin-bottom:20px;background:#fff;padding:15px;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,.1);display:flex;gap:10px;align-items:center;flex-wrap:wrap;}  
+    .toolbar button{padding:8px 15px;cursor:pointer;}  
+    .toolbar .status{margin-left:auto;font-size:12px;color:#333;opacity:.9;max-width:620px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}  
+    .calendar-header{display:flex;justify-content:center;align-items:center;gap:20px;margin-bottom:15px;}  
+    .calendar-header button{padding:10px 20px;cursor:pointer;border:none;background:#ddd;border-radius:5px;}  
+    .calendar-header button.active{background:#4e73df;color:white;}  
+    .month-title{font-size:28px;font-weight:bold;min-width:250px;text-align:center;}  
+    .calendar-wrap{width:1200px;margin:auto;}  
+    table{width:100%;border-collapse:collapse;table-layout:fixed;background:#fff;}  
+    th{background:#4e73df;color:white;padding:8px;}  
+    th.sun{background:#d32f2f;}  
+    th.sat{background:#1976d2;}  
+    td{border:1px solid #ccc;height:180px;vertical-align:top;padding:4px;}  
+    .today{outline:3px solid orange;}  
+    .day-number{font-size:16px;font-weight:bold;margin-bottom:3px;}  
+    .event-container{height:145px;overflow-y:auto;}  
+    .event-container::-webkit-scrollbar{width:6px;}  
+    .event-container::-webkit-scrollbar-thumb{background:#888;border-radius:4px;}  
+    .global-event{background:#fff176;border:1px solid #fbc02d;border-radius:4px;padding:3px;margin-bottom:3px;font-size:12px;font-weight:bold;cursor:pointer;}  
+    .work-event{padding:3px;margin-bottom:3px;border-radius:4px;font-size:12px;cursor:pointer;}  
+    .shift1{background:#dbeafe;}  
+    .shift2{background:#dcfce7;}  
+    #workModal,#eventModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);}  
+    .modal-content{background:#fff;width:350px;padding:20px;border-radius:10px;margin:120px auto;}  
+    .modal-content input[type=text],.modal-content input[type=date]{width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;}  
+    .modal-content button{margin-right:10px;}  
+    .note{width:1200px;margin:10px auto 0;color:#444;font-size:12px;opacity:.9;line-height:1.6;}  
+    code{background:#eee;padding:2px 4px;border-radius:4px;}  
+  </style>  
+</head>  
+  
+<body>  
+  <h1>勤務カレンダー（共有JSON）</h1>  
+  
+  <div class="toolbar">  
+    <button onclick="openEventModal()">イベント登録</button>  
+  
+    <!-- 共有JSON運用：Open→読み込み→以後自動上書き -->  
+    <button onclick="openJsonFileFromShare()">共有JSONを開く（読み込み＋以後自動保存）</button>  
+    <button onclick="importJsonNow()">JSONを再読み込み</button>  
+    <button onclick="exportJsonNow()">JSONを今すぐ上書き保存</button>  
+  
+    <div class="status" id="jsonStatus">JSON: 未設定</div>  
+  </div>  
+  
+  <div class="calendar-header">  
+    <button id="btnThisMonth" onclick="showThisMonth()">当月</button>  
+    <div id="monthTitle" class="month-title"></div>  
+    <button id="btnNextMonth" onclick="showNextMonth()">来月</button>  
+  </div>  
+  
+  <div class="calendar-wrap">  
+    <div id="calendar"></div>  
+  </div>  
+  
+  <div class="note">  
+    ・勤務登録: 日付セルを <b>ダブルクリック</b><br>  
+    ・削除: 登録済み項目をクリック<br>  
+    ・共有フォルダJSON: 最初に各PCで1回だけ「共有JSONを開く」が必要（ブラウザ仕様）。以後は変更のたびに自動上書き保存します。<br>  
+    ・注意: 複数PCが同じJSONを同時編集すると、最後に保存した内容で上書きされます（競合対策なし）。  
+  </div>  
+  
+  <!-- 勤務登録 -->  
+  <div id="workModal">  
+    <div class="modal-content">  
+      <h3>勤務登録</h3>  
+      <input type="text" id="workDate" readonly>  
+      <input type="text" id="employeeName" placeholder="名前">  
+      <label>  
+        <input type="radio" name="shift" value="1直" checked> 1直  
+      </label>  
+      <label style="margin-left:20px;">  
+        <input type="radio" name="shift" value="2直"> 2直  
+      </label>  
+      <br><br>  
+      <button onclick="saveWork()">登録</button>  
+      <button onclick="closeWorkModal()">閉じる</button>  
+    </div>  
+  </div>  
+  
+  <!-- イベント登録 -->  
+  <div id="eventModal">  
+    <div class="modal-content">  
+      <h3>イベント登録</h3>  
+      <input type="text" id="globalEventName" placeholder="イベント名">  
+      <label>開始日</label>  
+      <input type="date" id="eventStart">  
+      <label>終了日</label>  
+      <input type="date" id="eventEnd">  
+      <button onclick="saveGlobalEvent()">登録</button>  
+      <button onclick="closeEventModal()">閉じる</button>  
+    </div>  
+  </div>  
+  
+  <script>  
+    /* ---------------------------  
+       PWA: service worker登録（不要なら削除OK）  
+    ----------------------------*/  
+    if ("serviceWorker" in navigator) {  
+      navigator.serviceWorker.register("./sw.js").catch(console.error);  
+    }  
+  
+    /* ---------------------------  
+       カレンダー本体  
+    ----------------------------*/  
+    const today = new Date();  
+    const months = [  
+      { year: today.getFullYear(), month: today.getMonth() },  
+      {  
+        year: new Date(today.getFullYear(), today.getMonth() + 1, 1).getFullYear(),  
+        month: new Date(today.getFullYear(), today.getMonth() + 1, 1).getMonth()  
+      }  
+    ];  
+    let currentView = 0;  
+  
+    // データ本体（localStorageは「保険」程度に残す）  
+    let works = JSON.parse(localStorage.getItem("works")) || {};  
+    let globalEvents = JSON.parse(localStorage.getItem("globalEvents")) || [];  
+  
+    function saveStorage() {  
+      localStorage.setItem("works", JSON.stringify(works));  
+      localStorage.setItem("globalEvents", JSON.stringify(globalEvents));  
+    }  
+  
+    function showThisMonth() { currentView = 0; renderCalendar(); }  
+    function showNextMonth() { currentView = 1; renderCalendar(); }  
+  
+    function updateButtons() {  
+      document.getElementById("btnThisMonth").classList.remove("active");  
+      document.getElementById("btnNextMonth").classList.remove("active");  
+      if (currentView === 0) document.getElementById("btnThisMonth").classList.add("active");  
+      else document.getElementById("btnNextMonth").classList.add("active");  
+    }  
+  
+    function openWorkModal(date) {  
+      document.getElementById("workDate").value = date;  
+      document.getElementById("employeeName").value = "";  
+      document.getElementById("workModal").style.display = "block";  
+    }  
+    function closeWorkModal() { document.getElementById("workModal").style.display = "none"; }  
+  
+    function openEventModal() { document.getElementById("eventModal").style.display = "block"; }  
+    function closeEventModal() { document.getElementById("eventModal").style.display = "none"; }  
+  
+    /* 変更が発生したら呼ぶ（保存 + 再描画 + JSON上書き） */  
+    async function onDataChanged(reason) {  
+      saveStorage();  
+      renderCalendar();  
+      await exportJsonAuto(reason);  
+    }  
+  
+    function saveWork() {  
+      const date = document.getElementById("workDate").value;  
+      const name = document.getElementById("employeeName").value.trim();  
+      const shift = document.querySelector('input[name="shift"]:checked').value;  
+      if (!name) { alert("名前を入力してください"); return; }  
+      if (!works[date]) works[date] = [];  
+      works[date].push({ name, shift });  
+      closeWorkModal();  
+      onDataChanged("saveWork");  
+    }  
+  
+    function saveGlobalEvent() {  
+      const name = document.getElementById("globalEventName").value.trim();  
+      const start = document.getElementById("eventStart").value;  
+      const end = document.getElementById("eventEnd").value;  
+      if (!name || !start || !end) { alert("入力してください"); return; }  
+      if (start > end) { alert("開始日 <= 終了日にしてください"); return; }  
+      globalEvents.push({ name, start, end });  
+      closeEventModal();  
+      onDataChanged("saveGlobalEvent");  
+    }  
+  
+    function renderGlobalEvents(dateKey) {  
+      let html = "";  
+      globalEvents.forEach((g, index) => {  
+        if (dateKey >= g.start && dateKey <= g.end) {  
+          html += `  
+            <div class="global-event" onclick="deleteGlobalEvent(event,${index})">  
+              ${escapeHtml(g.name)}  
+            </div>`;  
+        }  
+      });  
+      return html;  
+    }  
+  
+    function renderWorks(dateKey) {  
+      if (!works[dateKey]) return "";  
+      return works[dateKey].map((w, index) => {  
+        const cls = (w.shift === "1直") ? "shift1" : "shift2";  
+        return `  
+          <div class="work-event ${cls}" onclick="deleteWork(event,'${dateKey}',${index})">  
+            ${escapeHtml(w.name)} (${escapeHtml(w.shift)})  
+          </div>`;  
+      }).join("");  
+    }  
+  
+    function deleteWork(e, date, index) {  
+      e.stopPropagation();  
+      if (!confirm("申請を削除しますか？")) return;  
+      works[date].splice(index, 1);  
+      if (works[date].length === 0) delete works[date];  
+      onDataChanged("deleteWork");  
+    }  
+  
+    function deleteGlobalEvent(e, index) {  
+      e.stopPropagation();  
+      if (!confirm("イベントを削除しますか？")) return;  
+      globalEvents.splice(index, 1);  
+      onDataChanged("deleteGlobalEvent");  
+    }  
+  
+    function renderCalendar() {  
+      const viewYear = months[currentView].year;  
+      const viewMonth = months[currentView].month;  
+      updateButtons();  
+  
+      document.getElementById("monthTitle").textContent = `${viewYear}年 ${viewMonth + 1}月`;  
+  
+      const firstDay = new Date(viewYear, viewMonth, 1);  
+      const lastDay = new Date(viewYear, viewMonth + 1, 0);  
+  
+      let html = `  
+        <table>  
+          <tr>  
+            <th class="sun">日</th><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th class="sat">土</th>  
+          </tr>  
+          <tr>`;  
+  
+      let startDay = firstDay.getDay();  
+      for (let i = 0; i < startDay; i++) html += "<td></td>";  
+  
+      for (let day = 1; day <= lastDay.getDate(); day++) {  
+        const dateKey = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;  
+  
+        if ((startDay + day - 1) % 7 === 0 && day !== 1) html += "</tr><tr>";  
+  
+        let tdClass = "";  
+        if (today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === day) {  
+          tdClass = "today";  
+        }  
+  
+        html += `  
+          <td class="${tdClass}" ondblclick="openWorkModal('${dateKey}')">  
+            <div class="day-number">${day}</div>  
+            <div class="event-container">  
+              ${renderGlobalEvents(dateKey)}  
+              ${renderWorks(dateKey)}  
+            </div>  
+          </td>`;  
+      }  
+  
+      html += "</tr></table>";  
+      document.getElementById("calendar").innerHTML = html;  
+    }  
+  
+    function escapeHtml(s) {  
+      return String(s).replace(/[&<>"']/g, (c) => ({  
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"  
+      }[c]));  
+    }  
+  
+    /* ---------------------------  
+       共有JSON：読み込み/自動上書き（File System Access API）  
+       + ハンドルをIndexedDBに保存（同一PC/同一ブラウザのみ復元可能）  
+    ----------------------------*/  
+    const HANDLE_DB = "work-calendar-db";  
+    const HANDLE_STORE = "handles";  
+    const JSON_HANDLE_ID = "jsonFileHandle_v1";  
+    let jsonFileHandle = null;  
+  
+    function setJsonStatus(msg) {  
+      document.getElementById("jsonStatus").textContent = "JSON: " + msg;  
+    }  
+  
+    function openHandleDb() {  
+      return new Promise((resolve, reject) => {  
+        const req = indexedDB.open(HANDLE_DB, 1);  
+        req.onupgradeneeded = () => {  
+          const db = req.result;  
+          if (!db.objectStoreNames.contains(HANDLE_STORE)) {  
+            db.createObjectStore(HANDLE_STORE);  
+          }  
+        };  
+        req.onsuccess = () => resolve(req.result);  
+        req.onerror = () => reject(req.error);  
+      });  
+    }  
+  
+    async function saveHandleToIdb(handle) {  
+      const db = await openHandleDb();  
+      return new Promise((resolve, reject) => {  
+        const tx = db.transaction(HANDLE_STORE, "readwrite");  
+        tx.objectStore(HANDLE_STORE).put(handle, JSON_HANDLE_ID);  
+        tx.oncomplete = () => resolve();  
+        tx.onerror = () => reject(tx.error);  
+      });  
+    }  
+  
+    async function loadHandleFromIdb() {  
+      const db = await openHandleDb();  
+      return new Promise((resolve, reject) => {  
+        const tx = db.transaction(HANDLE_STORE, "readonly");  
+        const req = tx.objectStore(HANDLE_STORE).get(JSON_HANDLE_ID);  
+        req.onsuccess = () => resolve(req.result || null);  
+        req.onerror = () => reject(req.error);  
+      });  
+    }  
+  
+    function buildJsonText() {  
+      const obj = {  
+        version: 1,  
+        updatedAt: new Date().toISOString(),  
+        works,  
+        globalEvents  
+      };  
+      return JSON.stringify(obj, null, 2);  
+    }  
+  
+    async function ensureRwPermission(handle) {  
+      if (!handle) return false;  
+      // 一部環境では queryPermission 自体が無い  
+      if (!handle.queryPermission) return true;  
+  
+      const perm = await handle.queryPermission({ mode: "readwrite" });  
+      if (perm === "granted") return true;  
+  
+      const req = await handle.requestPermission({ mode: "readwrite" });  
+      return req === "granted";  
+    }  
+  
+    async function readJsonFromHandle() {  
+      const ok = await ensureRwPermission(jsonFileHandle);  
+      if (!ok) throw new Error("permission denied");  
+  
+      const file = await jsonFileHandle.getFile();  
+      const text = await file.text();  
+  
+      if (!text.trim()) {  
+        works = {};  
+        globalEvents = [];  
+        saveStorage();  
+        renderCalendar();  
+        return;  
+      }  
+  
+      const obj = JSON.parse(text);  
+      works = obj?.works || {};  
+      globalEvents = obj?.globalEvents || [];  
+      saveStorage();  
+      renderCalendar();  
+    }  
+  
+    async function writeJsonToHandle(text) {  
+      const writable = await jsonFileHandle.createWritable({ keepExistingData: false });  
+      await writable.write(text);  
+      await writable.close();  
+    }  
+  
+    async function exportJsonAuto(reason) {  
+      if (!jsonFileHandle) {  
+        setJsonStatus("未設定（共有JSONを開くと自動上書き）");  
+        return;  
+      }  
+      try {  
+        const ok = await ensureRwPermission(jsonFileHandle);  
+        if (!ok) {  
+          setJsonStatus("権限なし（保存できません）");  
+          return;  
+        }  
+        await writeJsonToHandle(buildJsonText());  
+        setJsonStatus(`上書き保存（${new Date().toLocaleString()} / ${reason}）`);  
+      } catch (e) {  
+        console.error(e);  
+        setJsonStatus("保存失敗（共有フォルダ権限/ファイルを確認。必要なら開き直し）");  
+      }  
+    }  
+  
+    async function exportJsonNow() {  
+      await exportJsonAuto("manual");  
+    }  
+  
+    async function importJsonNow() {  
+      if (!jsonFileHandle) {  
+        alert("先に「共有JSONを開く」を押して、共有フォルダのJSONを選んでください。");  
+        return;  
+      }  
+      try {  
+        await readJsonFromHandle();  
+        setJsonStatus(`再読み込み（${new Date().toLocaleString()}）`);  
+      } catch (e) {  
+        console.error(e);  
+        setJsonStatus("読み込み失敗（権限/JSON形式を確認）");  
+        alert("読み込みに失敗しました。JSON形式・権限・共有フォルダのアクセス可否を確認してください。");  
+      }  
+    }  
+  
+    // 共有フォルダの既存JSONを「開く」→読み込み→以後自動保存  
+    async function openJsonFileFromShare() {  
+      if (!("showOpenFilePicker" in window)) {  
+        alert("この環境では使えません（File System Access API非対応）。");  
+        return;  
+      }  
+      try {  
+        const [handle] = await window.showOpenFilePicker({  
+          multiple: false,  
+          types: [{  
+            description: "JSON",  
+            accept: { "application/json": [".json"] }  
+          }]  
+        });  
+  
+        jsonFileHandle = handle;  
+        await saveHandleToIdb(jsonFileHandle);  
+  
+        await readJsonFromHandle(); // 選択した瞬間に読み込み  
+        setJsonStatus("共有JSONを開きました（以後自動上書き）");  
+      } catch (e) {  
+        console.warn(e);  
+      }  
+    }  
+  
+    // 起動時：同一PC/同一ブラウザなら保存先復元→自動読み込み  
+    async function loadSavedHandleAndAutoRead() {  
+      try {  
+        if (!("showOpenFilePicker" in window)) {  
+          setJsonStatus("この環境では自動保存不可");  
+          return;  
+        }  
+        jsonFileHandle = await loadHandleFromIdb();  
+        if (jsonFileHandle) {  
+          setJsonStatus("保存先復元（読み込み中…）");  
+          await readJsonFromHandle();  
+          setJsonStatus("保存先復元済み（自動読み込み完了・以後自動上書き）");  
+        } else {  
+          setJsonStatus("未設定（共有JSONを開くと自動上書き）");  
+        }  
+      } catch (e) {  
+        console.warn(e);  
+        setJsonStatus("保存先復元/読み込み失敗（共有JSONを開き直してください）");  
+      }  
+    }  
+  
+    /* 初期描画 */  
+    renderCalendar();  
+    loadSavedHandleAndAutoRead();  
+  </script>  
+</body>  
+</html>  
