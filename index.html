@@ -46,9 +46,7 @@
     .calendar-wrap{width:1200px;margin:auto;}  
     table{width:100%;border-collapse:collapse;table-layout:fixed;background:#fff;}  
   
-    /* ====== ここが「曜日色」設定（見出し＋本体） ====== */  
-  
-    /* 曜日見出し（上段） */  
+    /* 曜日見出し */  
     th{background:#9e9e9e;color:white;padding:8px;} /* 月〜金はグレー */  
     th.sun{background:#d32f2f;} /* 日：赤 */  
     th.sat{background:#1976d2;} /* 土：青 */  
@@ -59,7 +57,6 @@
     td.sat{ background:#e3f2fd; }     /* 土：薄い青 */  
     td.sun{ background:#ffebee; }     /* 日：薄い赤 */  
   
-    /* 今日の枠線 */  
     .today{outline:3px solid orange;}  
   
     .day-number{font-size:16px;font-weight:bold;margin-bottom:3px;}  
@@ -101,12 +98,8 @@
   
   <div class="calendar-header">  
     <button id="btnPrev" class="icon-btn" onclick="showPrevMonth()" title="前月">←</button>  
-  
-    <!-- 「変な・」対策で、真ん中は文字に変更 -->  
     <button id="btnThis" class="icon-btn" onclick="showThisMonth()" title="今月へ戻る">今月</button>  
-  
     <div id="monthTitle" class="month-title"></div>  
-  
     <button id="btnNext" class="icon-btn" onclick="showNextMonth()" title="翌月">→</button>  
   
     <!-- 管理者のみ表示 -->  
@@ -124,7 +117,7 @@
     勤務登録: 日付セルを <b>ダブルクリック</b><br>  
     削除: 登録済み項目をクリック<br>  
     共有フォルダJSON: 最初に各PCで1回だけ「共有JSONを開く」が必要（ブラウザ仕様）。以後は変更のたびに自動上書き保存します。<br>  
-    注意: 複数PCが同じJSONを同時編集すると、最後に保存した内容で上書きされます（競合対策なし）。<br>  
+    注意: 複数PCが同じJSONを同時編集すると、最後に保存した内容で上書きされます（競合対策は「保存直前に最新読込→変更→保存」で緩和）。<br>  
     管理者: ログインすると任意月（例: 9月/10月）へ移動できます（簡易パスワード）。  
   </div>  
   
@@ -196,7 +189,6 @@
   
     function adminLogout() {  
       sessionStorage.removeItem("isAdmin");  
-      // 管理者でない状態に戻るので、表示も当月へ戻して制限内に入れる  
       showThisMonth();  
       updateAdminUi();  
     }  
@@ -206,11 +198,9 @@
     ----------------------------*/  
     const today = new Date();  
   
-    // 当月・来月の基準（月初）  
     const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);  
     const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);  
   
-    // 表示中の月（可変）  
     let viewDate = new Date(thisMonthStart);  
   
     // データ本体（localStorageは「保険」程度に残す）  
@@ -222,7 +212,6 @@
       return "id-" + Date.now() + "-" + Math.random().toString(16).slice(2);  
     }  
   
-    // 既存データ（IDなし）を読み込んだ場合にID付与して整える  
     function normalizeData() {  
       for (const dateKey of Object.keys(works || {})) {  
         works[dateKey] = (works[dateKey] || []).map(w => ({  
@@ -245,7 +234,6 @@
       localStorage.setItem("globalEvents", JSON.stringify(globalEvents));  
     }  
   
-    // 非管理者のときは当月/来月以外へ行けないように矯正  
     function clampViewDateIfNeeded() {  
       if (isAdmin()) return;  
       const cur = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getTime();  
@@ -266,7 +254,6 @@
         return;  
       }  
   
-      // 非管理者: 当月/来月の2状態のみ  
       const cur = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getTime();  
       btnPrev.disabled = (cur === thisMonthStart.getTime());  
       btnNext.disabled = (cur === nextMonthStart.getTime());  
@@ -279,7 +266,6 @@
   
     function showPrevMonth() {  
       if (!isAdmin()) {  
-        // 非管理者: 来月→当月に戻るだけ  
         viewDate = new Date(thisMonthStart);  
         renderCalendar();  
         return;  
@@ -290,7 +276,6 @@
   
     function showNextMonth() {  
       if (!isAdmin()) {  
-        // 非管理者: 当月→来月に進むだけ  
         viewDate = new Date(nextMonthStart);  
         renderCalendar();  
         return;  
@@ -319,14 +304,42 @@
     function openEventModal() { document.getElementById("eventModal").style.display = "block"; }  
     function closeEventModal() { document.getElementById("eventModal").style.display = "none"; }  
   
-    /* 変更が発生したら呼ぶ（保存 + 再描画 + JSON上書き） */  
-    async function onDataChanged(reason) {  
-      normalizeData();  
-      saveStorage();  
-      renderCalendar();  
-      await exportJsonAuto(reason);  
+    /* ============================================================  
+      競合緩和の要：保存直前に「最新読込→変更→保存」を直列で実行  
+    ============================================================ */  
+    let syncQueue = Promise.resolve();  
+    function enqueueSync(task) {  
+      syncQueue = syncQueue.then(task, task);  
+      return syncQueue;  
     }  
   
+    async function syncAndMutate(mutator, reason) {  
+      return enqueueSync(async () => {  
+        // 共有JSONがある場合は、変更前に必ず最新を取り込む  
+        if (jsonFileHandle) {  
+          try {  
+            await readJsonFromHandleToMemoryOnly();  
+          } catch (e) {  
+            console.warn(e);  
+            // 読み込み失敗でも、ローカルでの操作自体は継続（必要ならreturnで止めてもOK）  
+            setJsonStatus("最新読込に失敗（ローカルで継続）");  
+          }  
+        }  
+  
+        // 最新状態に対して変更を適用  
+        mutator();  
+  
+        // 正規化・保存・描画・共有JSONへ上書き  
+        normalizeData();  
+        saveStorage();  
+        renderCalendar();  
+        await exportJsonAuto(reason);  
+      });  
+    }  
+  
+    /* ---------------------------  
+      追加/削除（syncAndMutate経由に変更）  
+    ----------------------------*/  
     function saveWork() {  
       const date = document.getElementById("workDate").value;  
       const name = document.getElementById("employeeName").value.trim();  
@@ -334,11 +347,12 @@
   
       if (!name) { alert("名前を入力してください"); return; }  
   
-      if (!works[date]) works[date] = [];  
-      works[date].push({ id: newId(), name, shift });  
-  
       closeWorkModal();  
-      onDataChanged("saveWork");  
+  
+      syncAndMutate(() => {  
+        if (!works[date]) works[date] = [];  
+        works[date].push({ id: newId(), name, shift });  
+      }, "saveWork");  
     }  
   
     function saveGlobalEvent() {  
@@ -349,10 +363,11 @@
       if (!name || !start || !end) { alert("入力してください"); return; }  
       if (start > end) { alert("開始日 <= 終了日にしてください"); return; }  
   
-      globalEvents.push({ id: newId(), name, start, end });  
-  
       closeEventModal();  
-      onDataChanged("saveGlobalEvent");  
+  
+      syncAndMutate(() => {  
+        globalEvents.push({ id: newId(), name, start, end });  
+      }, "saveGlobalEvent");  
     }  
   
     function renderGlobalEvents(dateKey) {  
@@ -368,7 +383,6 @@
       return html;  
     }  
   
-    // 1直→2直で表示（ソート表示）※削除はIDで行うのでズレない  
     function renderWorks(dateKey) {  
       if (!works[dateKey]) return "";  
   
@@ -390,18 +404,19 @@
       e.stopPropagation();  
       if (!confirm("申請を削除しますか？")) return;  
   
-      works[date] = (works[date] || []).filter(w => w.id !== id);  
-      if (works[date].length === 0) delete works[date];  
-  
-      onDataChanged("deleteWorkById");  
+      syncAndMutate(() => {  
+        works[date] = (works[date] || []).filter(w => w.id !== id);  
+        if (works[date].length === 0) delete works[date];  
+      }, "deleteWorkById");  
     }  
   
     function deleteGlobalEvent(e, id) {  
       e.stopPropagation();  
       if (!confirm("イベントを削除しますか？")) return;  
   
-      globalEvents = (globalEvents || []).filter(g => g.id !== id);  
-      onDataChanged("deleteGlobalEvent");  
+      syncAndMutate(() => {  
+        globalEvents = (globalEvents || []).filter(g => g.id !== id);  
+      }, "deleteGlobalEvent");  
     }  
   
     function renderCalendar() {  
@@ -430,9 +445,7 @@
   
         if ((startDay + day - 1) % 7 === 0 && day !== 1) html += "</tr><tr>";  
   
-        // ====== ここが追加：曜日ごとのクラスを td に付与 ======  
         let classes = [];  
-  
         const dow = new Date(viewYear, viewMonth, day).getDay(); // 0=日,6=土  
         if (dow === 0) classes.push("sun");  
         else if (dow === 6) classes.push("sat");  
@@ -443,7 +456,6 @@
         }  
   
         const tdClass = classes.join(" ");  
-        // ========================================================  
   
         html += `  
           <td class="${tdClass}" ondblclick="openWorkModal('${dateKey}')">  
@@ -535,7 +547,8 @@
       return req === "granted";  
     }  
   
-    async function readJsonFromHandle() {  
+    // ★「読み込みだけ」版（競合緩和のために追加）  
+    async function readJsonFromHandleToMemoryOnly() {  
       const ok = await ensureRwPermission(jsonFileHandle);  
       if (!ok) throw new Error("permission denied");  
   
@@ -545,18 +558,19 @@
       if (!text.trim()) {  
         works = {};  
         globalEvents = [];  
-        normalizeData();  
-        saveStorage();  
-        renderCalendar();  
-        return;  
+      } else {  
+        const obj = JSON.parse(text);  
+        works = obj?.works || {};  
+        globalEvents = obj?.globalEvents || [];  
       }  
-  
-      const obj = JSON.parse(text);  
-      works = obj?.works || {};  
-      globalEvents = obj?.globalEvents || [];  
   
       normalizeData();  
       saveStorage();  
+    }  
+  
+    // 画面にも反映したいときの読み込み（ボタン「再読み込み」用）  
+    async function readJsonFromHandle() {  
+      await readJsonFromHandleToMemoryOnly();  
       renderCalendar();  
     }  
   
