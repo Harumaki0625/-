@@ -118,24 +118,31 @@
     削除: 登録済み項目をクリック<br>  
     共有フォルダJSON: 最初に各PCで1回だけ「共有JSONを開く」が必要（ブラウザ仕様）。以後は変更のたびに自動上書き保存します。<br>  
     注意: 複数PCが同じJSONを同時編集すると、最後に保存した内容で上書きされます（競合対策は「保存直前に最新読込→変更→保存」で緩和）。<br>  
-    管理者: ログインすると任意月（例: 9月/10月）へ移動できます（簡易パスワード）。  
+    管理者: ログインすると任意月（例: 9月/10月）へ移動できます（簡易パスワード）。<br>  
+    <b>Enterキー:</b> 勤務登録/イベント登録フォームでEnter押下で「登録」します（textarea等が無い前提）。  
   </div>  
   
   <!-- 勤務登録 -->  
   <div id="workModal">  
     <div class="modal-content">  
       <h3>勤務登録</h3>  
-      <input type="text" id="workDate" readonly>  
-      <input type="text" id="employeeName" placeholder="名前">  
-      <label>  
-        <input type="radio" name="shift" value="1直" checked> 1直  
-      </label>  
-      <label style="margin-left:20px;">  
-        <input type="radio" name="shift" value="2直"> 2直  
-      </label>  
-      <br><br>  
-      <button onclick="saveWork()">登録</button>  
-      <button onclick="closeWorkModal()">閉じる</button>  
+  
+      <!-- ★ form化：Enterでsubmit → saveWork() -->  
+      <form id="workForm">  
+        <input type="text" id="workDate" readonly>  
+        <input type="text" id="employeeName" placeholder="名前">  
+  
+        <label>  
+          <input type="radio" name="shift" value="1直" checked> 1直  
+        </label>  
+        <label style="margin-left:20px;">  
+          <input type="radio" name="shift" value="2直"> 2直  
+        </label>  
+        <br><br>  
+  
+        <button type="submit">登録</button>  
+        <button type="button" onclick="closeWorkModal()">閉じる</button>  
+      </form>  
     </div>  
   </div>  
   
@@ -143,13 +150,20 @@
   <div id="eventModal">  
     <div class="modal-content">  
       <h3>イベント登録</h3>  
-      <input type="text" id="globalEventName" placeholder="イベント名">  
-      <label>開始日</label>  
-      <input type="date" id="eventStart">  
-      <label>終了日</label>  
-      <input type="date" id="eventEnd">  
-      <button onclick="saveGlobalEvent()">登録</button>  
-      <button onclick="closeEventModal()">閉じる</button>  
+  
+      <!-- ★ form化：Enterでsubmit → saveGlobalEvent() -->  
+      <form id="eventForm">  
+        <input type="text" id="globalEventName" placeholder="イベント名">  
+  
+        <label>開始日</label>  
+        <input type="date" id="eventStart">  
+  
+        <label>終了日</label>  
+        <input type="date" id="eventEnd">  
+  
+        <button type="submit">登録</button>  
+        <button type="button" onclick="closeEventModal()">閉じる</button>  
+      </form>  
     </div>  
   </div>  
   
@@ -298,10 +312,16 @@
       document.getElementById("workDate").value = date;  
       document.getElementById("employeeName").value = "";  
       document.getElementById("workModal").style.display = "block";  
+  
+      // ★ 開いたら名前にフォーカス（Enter登録が使いやすい）  
+      setTimeout(() => document.getElementById("employeeName").focus(), 0);  
     }  
     function closeWorkModal() { document.getElementById("workModal").style.display = "none"; }  
   
-    function openEventModal() { document.getElementById("eventModal").style.display = "block"; }  
+    function openEventModal() {  
+      document.getElementById("eventModal").style.display = "block";  
+      setTimeout(() => document.getElementById("globalEventName").focus(), 0);  
+    }  
     function closeEventModal() { document.getElementById("eventModal").style.display = "none"; }  
   
     /* ============================================================  
@@ -477,6 +497,30 @@
       return String(s).replace(/[&<>"']/g, (c) => ({  
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"  
       }[c]));  
+    }  
+  
+    /* ---------------------------  
+      ★ Enterキーで登録（フォームsubmitで実現）  
+      - formのsubmitを握って saveWork / saveGlobalEvent を呼ぶ  
+      - ブラウザのデフォルトsubmit(ページ遷移)を防止  
+    ----------------------------*/  
+    function setupEnterSubmit() {  
+      const workForm = document.getElementById("workForm");  
+      const eventForm = document.getElementById("eventForm");  
+  
+      if (workForm) {  
+        workForm.addEventListener("submit", (e) => {  
+          e.preventDefault();  
+          saveWork();  
+        });  
+      }  
+  
+      if (eventForm) {  
+        eventForm.addEventListener("submit", (e) => {  
+          e.preventDefault();  
+          saveGlobalEvent();  
+        });  
+      }  
     }  
   
     /* ---------------------------  
@@ -663,6 +707,7 @@
     saveStorage();  
     updateAdminUi();  
     renderCalendar();  
+    setupEnterSubmit();            // ★追加  
     loadSavedHandleAndAutoRead();  
   </script>  
 </body>  
