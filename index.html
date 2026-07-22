@@ -68,7 +68,6 @@
     td.sun{ background:#ffebee; }     /* 日：薄い赤 */  
   
     .today{outline:3px solid orange;}  
-  
     .day-number{font-size:16px;font-weight:bold;margin-bottom:3px;}  
     .event-container{height:145px;overflow-y:auto;}  
     .event-container::-webkit-scrollbar{width:6px;}  
@@ -93,7 +92,8 @@
   <h1>勤務カレンダー</h1>  
   
   <div class="toolbar">  
-    <button onclick="openEventModal()">イベント登録</button>  
+    <!-- ★ JSON未設定時は無効化するのでID付与 -->  
+    <button id="btnEvent" onclick="openEventModal()">イベント登録</button>  
   
     <!-- 管理者（簡易） -->  
     <button onclick="adminLogin()">管理者ログイン</button>  
@@ -128,7 +128,8 @@
     削除: 登録済み項目をクリック<br>  
     共有フォルダJSON: 最初に各PCで1回だけ「共有JSONを開く」が必要（ブラウザ仕様）。以後は変更のたびに自動上書き。<br>  
     管理者: ログインすると任意月（例: 9月/10月）へ移動できます（簡易パスワード）。<br>  
-    <b>Enterキー:</b> 勤務登録/イベント登録フォームでEnter押下で「登録」します（textarea等が無い前提）。  
+    <b>Enterキー:</b> 勤務登録/イベント登録フォームでEnter押下で「登録」します（textarea等が無い前提）。<br>  
+    <b>※共有JSONが読み込まれていない間は、イベント登録・勤務(有給)登録はできません。</b>  
   </div>  
   
   <!-- 勤務登録 -->  
@@ -317,7 +318,33 @@
       renderCalendar();  
     }  
   
+    /* ============================================================  
+      ★追加：JSONが読み込まれていないと登録できないようにする  
+      - 判定：jsonFileHandle があること（=共有JSONを開いた/復元できた）  
+      - UI：イベント登録ボタン無効化、勤務登録(ダブルクリック)もブロック  
+    ============================================================ */  
+    function isJsonReady() {  
+      return !!jsonFileHandle;  
+    }  
+  
+    function updateJsonDependentUi() {  
+      const disabled = !isJsonReady();  
+  
+      // イベント登録ボタンを無効化  
+      const btnEvent = document.getElementById("btnEvent");  
+      if (btnEvent) btnEvent.disabled = disabled;  
+    }  
+  
+    function requireJsonOrAlert(actionName) {  
+      if (isJsonReady()) return true;  
+      alert(`共有JSONファイルが読み込まれていないため、${actionName}はできません。\n先に「共有JSONファイルを開く」を実行してください。`);  
+      return false;  
+    }  
+  
     function openWorkModal(date) {  
+      // ★追加：JSON未読込ならブロック  
+      if (!requireJsonOrAlert("勤務(有給)登録")) return;  
+  
       document.getElementById("workDate").value = date;  
       document.getElementById("employeeName").value = "";  
       document.getElementById("workModal").style.display = "block";  
@@ -328,6 +355,9 @@
     function closeWorkModal() { document.getElementById("workModal").style.display = "none"; }  
   
     function openEventModal() {  
+      // ★追加：JSON未読込ならブロック  
+      if (!requireJsonOrAlert("イベント登録")) return;  
+  
       document.getElementById("eventModal").style.display = "block";  
       setTimeout(() => document.getElementById("globalEventName").focus(), 0);  
     }  
@@ -369,6 +399,9 @@
       追加/削除（syncAndMutate経由に変更）  
     ----------------------------*/  
     function saveWork() {  
+      // ★念のため（モーダルを直接開かれたケース等にも備える）  
+      if (!requireJsonOrAlert("勤務(有給)登録")) return;  
+  
       const date = document.getElementById("workDate").value;  
       const name = document.getElementById("employeeName").value.trim();  
       const shift = document.querySelector('input[name="shift"]:checked').value;  
@@ -384,6 +417,9 @@
     }  
   
     function saveGlobalEvent() {  
+      // ★念のため  
+      if (!requireJsonOrAlert("イベント登録")) return;  
+  
       const name = document.getElementById("globalEventName").value.trim();  
       const start = document.getElementById("eventStart").value;  
       const end = document.getElementById("eventEnd").value;  
@@ -479,6 +515,7 @@
         const dow = new Date(viewYear, viewMonth, day).getDay(); // 0=日,6=土  
         if (dow === 0) classes.push("sun");  
         else if (dow === 6) classes.push("sat");  
+  
         // ★ weekdayクラスは付けない（＝白のまま）  
   
         if (today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === day) {  
@@ -664,10 +701,12 @@
       try {  
         await readJsonFromHandle();  
         setJsonStatus(`再読み込み（${new Date().toLocaleString()}）`);  
+        updateJsonDependentUi(); // ★追加  
       } catch (e) {  
         console.error(e);  
         setJsonStatus("読み込み失敗（権限/JSON形式を確認）");  
         alert("読み込みに失敗しました。JSON形式・権限・共有フォルダのアクセス可否を確認してください。");  
+        updateJsonDependentUi(); // ★追加  
       }  
     }  
   
@@ -690,8 +729,10 @@
   
         await readJsonFromHandle();  
         setJsonStatus("共有JSONを開きました（以後自動上書き）");  
+        updateJsonDependentUi(); // ★追加  
       } catch (e) {  
         console.warn(e);  
+        updateJsonDependentUi(); // ★追加  
       }  
     }  
   
@@ -699,6 +740,7 @@
       try {  
         if (!("showOpenFilePicker" in window)) {  
           setJsonStatus("この環境では自動保存不可");  
+          updateJsonDependentUi(); // ★追加  
           return;  
         }  
         jsonFileHandle = await loadHandleFromIdb();  
@@ -709,9 +751,11 @@
         } else {  
           setJsonStatus("未設定（共有JSONを開くと自動上書き）");  
         }  
+        updateJsonDependentUi(); // ★追加  
       } catch (e) {  
         console.warn(e);  
         setJsonStatus("保存先復元/読み込み失敗（共有JSONを開き直してください）");  
+        updateJsonDependentUi(); // ★追加  
       }  
     }  
   
@@ -721,6 +765,10 @@
     updateAdminUi();  
     renderCalendar();  
     setupEnterSubmit();  
+  
+    // ★初期は未設定なので登録UIを止める  
+    updateJsonDependentUi();  
+  
     loadSavedHandleAndAutoRead();  
   </script>  
 </body>  
