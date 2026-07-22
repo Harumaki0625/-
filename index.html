@@ -52,8 +52,18 @@
     th.sat{background:#1976d2;} /* 土：青 */  
   
     /* 日付セル（本体） */  
-    td{border:1px solid #ccc;height:180px;vertical-align:top;padding:4px;background:#fff;}  
-    td.weekday{ background:#f2f2f2; } /* 月〜金：薄い灰色 */  
+    td{  
+      border:1px solid #ccc;  
+      height:180px;  
+      vertical-align:top;  
+      padding:4px;  
+      background:#fff; /* ★月〜金は基本「白」 */  
+    }  
+  
+    /* ★日付が割り当てられていないセルだけ薄い灰色 */  
+    td.empty{ background:#f2f2f2; }  
+  
+    /* 土日だけ色を付ける */  
     td.sat{ background:#e3f2fd; }     /* 土：薄い青 */  
     td.sun{ background:#ffebee; }     /* 日：薄い赤 */  
   
@@ -116,8 +126,7 @@
   <div class="note">  
     勤務登録: 日付セルを <b>ダブルクリック</b><br>  
     削除: 登録済み項目をクリック<br>  
-    共有フォルダJSON: 最初に各PCで1回だけ「共有JSONを開く」が必要（ブラウザ仕様）。以後は変更のたびに自動上書き保存します。<br>  
-    注意: 複数PCが同じJSONを同時編集すると、最後に保存した内容で上書きされます（競合対策は「保存直前に最新読込→変更→保存」で緩和）。<br>  
+    共有フォルダJSON: 最初に各PCで1回だけ「共有JSONを開く」が必要（ブラウザ仕様）。以後は変更のたびに自動上書き。<br>  
     管理者: ログインすると任意月（例: 9月/10月）へ移動できます（簡易パスワード）。<br>  
     <b>Enterキー:</b> 勤務登録/イベント登録フォームでEnter押下で「登録」します（textarea等が無い前提）。  
   </div>  
@@ -341,7 +350,6 @@
             await readJsonFromHandleToMemoryOnly();  
           } catch (e) {  
             console.warn(e);  
-            // 読み込み失敗でも、ローカルでの操作自体は継続（必要ならreturnで止めてもOK）  
             setJsonStatus("最新読込に失敗（ローカルで継続）");  
           }  
         }  
@@ -457,8 +465,10 @@
           </tr>  
           <tr>`;  
   
-      let startDay = firstDay.getDay();  
-      for (let i = 0; i < startDay; i++) html += "<td></td>";  
+      let startDay = firstDay.getDay(); // 0=日...6=土  
+  
+      // ★ 前月側の空白セル：emptyで薄灰  
+      for (let i = 0; i < startDay; i++) html += '<td class="empty"></td>';  
   
       for (let day = 1; day <= lastDay.getDate(); day++) {  
         const dateKey = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;  
@@ -469,7 +479,7 @@
         const dow = new Date(viewYear, viewMonth, day).getDay(); // 0=日,6=土  
         if (dow === 0) classes.push("sun");  
         else if (dow === 6) classes.push("sat");  
-        else classes.push("weekday");  
+        // ★ weekdayクラスは付けない（＝白のまま）  
   
         if (today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === day) {  
           classes.push("today");  
@@ -487,6 +497,11 @@
           </td>`;  
       }  
   
+      // ★ 翌月側の空白セルも埋める（emptyで薄灰）  
+      const totalCells = startDay + lastDay.getDate();  
+      const remain = (7 - (totalCells % 7)) % 7;  
+      for (let i = 0; i < remain; i++) html += '<td class="empty"></td>';  
+  
       html += "</tr></table>";  
       document.getElementById("calendar").innerHTML = html;  
   
@@ -501,8 +516,6 @@
   
     /* ---------------------------  
       ★ Enterキーで登録（フォームsubmitで実現）  
-      - formのsubmitを握って saveWork / saveGlobalEvent を呼ぶ  
-      - ブラウザのデフォルトsubmit(ページ遷移)を防止  
     ----------------------------*/  
     function setupEnterSubmit() {  
       const workForm = document.getElementById("workForm");  
@@ -707,7 +720,7 @@
     saveStorage();  
     updateAdminUi();  
     renderCalendar();  
-    setupEnterSubmit();            // ★追加  
+    setupEnterSubmit();  
     loadSavedHandleAndAutoRead();  
   </script>  
 </body>  
